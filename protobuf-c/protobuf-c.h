@@ -196,10 +196,14 @@ size_t foo__bar__baz_bah__pack_to_buffer
 #ifndef PROTOBUF_C_H
 #define PROTOBUF_C_H
 
+#ifdef __KERNEL__
+#include <linux/stddef.h>
+#include <linux/types.h>
+#else
 #include <assert.h>
-#include <limits.h>
 #include <stddef.h>
 #include <stdint.h>
+#endif
 
 #ifdef __cplusplus
 # define PROTOBUF_C__BEGIN_DECLS	extern "C" {

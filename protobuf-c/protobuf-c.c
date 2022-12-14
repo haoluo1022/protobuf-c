@@ -45,10 +45,20 @@
  * \todo Use size_t consistently.
  */
 
+#ifdef __KERNEL__
+#include <linux/slab.h>    /* for kmalloc, vfree */
+#include <linux/string.h>  /* for strcmp, strlen, memcpy, memmove, memset */
+#else  /* __KERNEL__ */
+#include <limits.h> /* for INT_MAX */
 #include <stdlib.h>	/* for malloc, free */
 #include <string.h>	/* for strcmp, strlen, memcpy, memmove, memset */
+#endif
 
 #include "protobuf-c.h"
+
+#ifdef __KERNEL__
+#define assert(x) BUG_ON(x)
+#endif
 
 #define TRUE				1
 #define FALSE				0
@@ -147,6 +157,32 @@ protobuf_c_version_number(void)
 
 /* --- allocator --- */
 
+#ifdef __KERNEL__
+static void *
+kernel_alloc(void *allocator_data, size_t size)
+{
+	(void)allocator_data;
+	return kmalloc(size, GFP_KERNEL);
+}
+
+static void
+kernel_free(void *allocator_data, void *data)
+{
+	(void)allocator_data;
+	kfree(data);
+}
+
+/*
+ * This allocator uses the Linux kernel's vmalloc() and vfree(). It is the
+ * default allocator used if NULL is passed as the ProtobufCAllocator to an
+ * exported function.
+ */
+static ProtobufCAllocator protobuf_c__allocator = {
+	.alloc = &kernel_alloc,
+	.free = &kernel_free,
+	.allocator_data = NULL,
+};
+#else /* __KERNEL__ */
 static void *
 system_alloc(void *allocator_data, size_t size)
 {
@@ -161,6 +197,18 @@ system_free(void *allocator_data, void *data)
 	free(data);
 }
 
+/*
+ * This allocator uses the system's malloc() and free(). It is the default
+ * allocator used if NULL is passed as the ProtobufCAllocator to an exported
+ * function.
+ */
+static ProtobufCAllocator protobuf_c__allocator = {
+	.alloc = &system_alloc,
+	.free = &system_free,
+	.allocator_data = NULL,
+};
+#endif /* __KERNEL__ */
+
 static inline void *
 do_alloc(ProtobufCAllocator *allocator, size_t size)
 {
@@ -173,17 +221,6 @@ do_free(ProtobufCAllocator *allocator, void *data)
 	if (data != NULL)
 		allocator->free(allocator->allocator_data, data);
 }
-
-/*
- * This allocator uses the system's malloc() and free(). It is the default
- * allocator used if NULL is passed as the ProtobufCAllocator to an exported
- * function.
- */
-static ProtobufCAllocator protobuf_c__allocator = {
-	.alloc = &system_alloc,
-	.free = &system_free,
-	.allocator_data = NULL,
-};
 
 /* === buffer-simple === */
 
