@@ -46,6 +46,7 @@
  */
 
 #ifdef __KERNEL__
+#include <linux/btf.h>
 #include <linux/slab.h>    /* for kmalloc, vfree */
 #include <linux/string.h>  /* for strcmp, strlen, memcpy, memmove, memset */
 #else  /* __KERNEL__ */
@@ -577,6 +578,7 @@ field_is_zeroish(const ProtobufCFieldDescriptor *field,
 	case PROTOBUF_C_TYPE_UINT32:
 	case PROTOBUF_C_TYPE_SFIXED32:
 	case PROTOBUF_C_TYPE_FIXED32:
+	case PROTOBUF_C_TYPE_FLOAT:
 		ret = (0 == *(const uint32_t *) member);
 		break;
 	case PROTOBUF_C_TYPE_SINT64:
@@ -584,13 +586,8 @@ field_is_zeroish(const ProtobufCFieldDescriptor *field,
 	case PROTOBUF_C_TYPE_UINT64:
 	case PROTOBUF_C_TYPE_SFIXED64:
 	case PROTOBUF_C_TYPE_FIXED64:
-		ret = (0 == *(const uint64_t *) member);
-		break;
-	case PROTOBUF_C_TYPE_FLOAT:
-		ret = (0 == *(const float *) member);
-		break;
 	case PROTOBUF_C_TYPE_DOUBLE:
-		ret = (0 == *(const double *) member);
+		ret = (0 == *(const uint64_t *) member);
 		break;
 	case PROTOBUF_C_TYPE_STRING:
 		ret = (NULL == *(const char * const *) member) ||
@@ -3707,3 +3704,115 @@ protobuf_c_service_descriptor_get_method_by_name(const ProtobufCServiceDescripto
 		return desc->methods + desc->method_indices_by_name[start];
 	return NULL;
 }
+
+#ifdef __KERNEL__
+/*
+ * Export kfuncs for BPF to use.
+ *
+ * For BPF, see https://www.kernel.org/doc/html/latest/bpf/index.html
+ * For kfunc, see https://www.kernel.org/doc/html/latest/bpf/kfuncs.html
+ */
+
+/* Disables missing prototype warnings */
+__diag_push();
+__diag_ignore_all("-Wmissing-prototypes",
+                  "Global kfuncs as their definitions will be in BTF");
+
+const ProtobufCEnumValue *
+bpf_pb_enum_get_value_by_name(
+	const ProtobufCEnumDescriptor *desc,
+	const char *name, int name__sz) {
+	return protobuf_c_enum_descriptor_get_value_by_name(desc, name);
+}
+
+const ProtobufCEnumValue *
+bpf_pb_enum_get_value(
+	const ProtobufCEnumDescriptor *desc,
+	int value) {
+	return protobuf_c_enum_descriptor_get_value(desc, value);
+}
+
+
+const ProtobufCFieldDescriptor *
+bpf_pb_message_get_field_by_name(
+	const ProtobufCMessageDescriptor *desc,
+	const char *name, int name_sz) {
+	return protobuf_c_message_descriptor_get_field_by_name(desc, name);
+}
+
+const ProtobufCFieldDescriptor *
+bpf_pb_message_get_field(
+	const ProtobufCMessageDescriptor *desc,
+	unsigned value) {
+	return protobuf_c_message_descriptor_get_field(desc, value);
+}
+
+size_t
+bpf_pb_message_get_packed_size(
+	const ProtobufCMessage *message) {
+	return protobuf_c_message_get_packed_size(message);
+}
+
+size_t
+bpf_pb_message_pack(const ProtobufCMessage *message, char *out, int out__sz) {
+	return protobuf_c_message_pack(message, (uint8_t *)out);
+}
+
+size_t
+bpf_pb_message_pack_to_buffer(
+	const ProtobufCMessage *message,
+	ProtobufCBuffer *buffer) {
+	return protobuf_c_message_pack_to_buffer(message, buffer);
+}
+
+ProtobufCMessage *
+bpf_pb_message_unpack(
+	const ProtobufCMessageDescriptor *descriptor,
+	const char *data, int data__sz) {
+	return protobuf_c_message_unpack(descriptor, NULL, data__sz, data);
+}
+
+void
+bpf_pb_message_free_unpack(
+	ProtobufCMessage *message) {
+	return protobuf_c_message_free_unpacked(message, NULL);
+}
+
+bool bpf_pb_message_check(const ProtobufCMessage *message) {
+	return protobuf_c_message_check(message);
+}
+
+void
+bpf_pb_message_init(
+	const ProtobufCMessageDescriptor *descriptor,
+	void *message, int message__sz) {
+	return protobuf_c_message_init(descriptor, message);
+}
+
+__diag_pop();
+
+BTF_SET8_START(bpf_pb_message_set)
+BTF_ID_FLAGS(func, bpf_pb_enum_get_value_by_name, KF_RET_NULL)
+BTF_ID_FLAGS(func, bpf_pb_enum_get_value, KF_RET_NULL)
+BTF_ID_FLAGS(func, bpf_pb_message_get_field_by_name, KF_RET_NULL)
+BTF_ID_FLAGS(func, bpf_pb_message_get_field, KF_RET_NULL)
+BTF_ID_FLAGS(func, bpf_pb_message_get_packed_size)
+BTF_ID_FLAGS(func, bpf_pb_message_pack)
+BTF_ID_FLAGS(func, bpf_pb_message_pack_to_buffer)
+BTF_ID_FLAGS(func, bpf_pb_message_unpack, KF_ACQUIRE | KF_RET_NULL)
+BTF_ID_FLAGS(func, bpf_pb_message_free_unpack, KF_RELEASE)
+BTF_ID_FLAGS(func, bpf_pb_message_check, KF_TRUSTED_ARGS)
+BTF_ID_FLAGS(func, bpf_pb_message_init)
+BTF_SET8_END(bpf_pb_message_set)
+
+static const struct btf_kfunc_id_set bpf_pb_message_kfunc_set = {
+        .owner = THIS_MODULE,
+        .set   = &bpf_pb_message_set,
+};
+
+static int init_subsystem(void)
+{
+        return register_btf_kfunc_id_set(BPF_PROG_TYPE_TRACING, &bpf_pb_message_kfunc_set);
+}
+late_initcall(init_subsystem);
+#endif
